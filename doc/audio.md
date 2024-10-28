@@ -28,14 +28,21 @@ To disable only the audio playback, see [no playback](video.md#no-playback).
 
 ## Audio only
 
-To play audio only, disable the video:
+To play audio only, disable video and control:
 
 ```bash
-scrcpy --no-video
+scrcpy --no-video --no-control
+```
+
+To play audio without a window:
+
+```bash
+# --no-video and --no-control are implied by --no-window
+scrcpy --no-window
 # interrupt with Ctrl+C
 ```
 
-Without video, the audio latency is typically not criticial, so it might be
+Without video, the audio latency is typically not critical, so it might be
 interesting to add [buffering](#buffering) to minimize glitches:
 
 ```
@@ -59,15 +66,40 @@ the computer:
 scrcpy --audio-source=mic --no-video --no-playback --record=file.opus
 ```
 
+### Duplication
+
+An alternative device audio capture method is also available (only for Android
+13 and above):
+
+```
+scrcpy --audio-source=playback
+```
+
+This audio source supports keeping the audio playing on the device while
+mirroring, with `--audio-dup`:
+
+```bash
+scrcpy --audio-source=playback --audio-dup
+# or simply:
+scrcpy --audio-dup  # --audio-source=playback is implied
+```
+
+However, it requires Android 13, and Android apps can opt-out (so they are not
+captured).
+
+
+See [#4380](https://github.com/Genymobile/scrcpy/issues/4380).
+
 
 ## Codec
 
-The audio codec can be selected. The possible values are `opus` (default), `aac`
-and `raw` (uncompressed PCM 16-bit LE):
+The audio codec can be selected. The possible values are `opus` (default),
+`aac`, `flac` and `raw` (uncompressed PCM 16-bit LE):
 
 ```bash
 scrcpy --audio-codec=opus  # default
 scrcpy --audio-codec=aac
+scrcpy --audio-codec=flac
 scrcpy --audio-codec=raw
 ```
 
@@ -77,6 +109,20 @@ In particular, if you get the following error:
 
 then your device has no Opus encoder: try `scrcpy --audio-codec=aac`.
 
+For advanced usage, to pass arbitrary parameters to the [`MediaFormat`],
+check `--audio-codec-options` in the manpage or in `scrcpy --help`.
+
+For example, to change the [FLAC compression level]:
+
+```bash
+scrcpy --audio-codec=flac --audio-codec-options=flac-compression-level=8
+```
+
+[`MediaFormat`]: https://developer.android.com/reference/android/media/MediaFormat
+[FLAC compression level]: https://developer.android.com/reference/android/media/MediaFormat#KEY_FLAC_COMPRESSION_LEVEL
+
+
+## Encoder
 
 Several encoders may be available on the device. They can be listed by:
 
@@ -86,14 +132,9 @@ scrcpy --list-encoders
 
 To select a specific encoder:
 
-```
+```bash
 scrcpy --audio-codec=opus --audio-encoder='c2.android.opus.encoder'
 ```
-
-For advanced usage, to pass arbitrary parameters to the [`MediaFormat`],
-check `--audio-codec-options` in the manpage or in `scrcpy --help`.
-
-[`MediaFormat`]: https://developer.android.com/reference/android/media/MediaFormat
 
 
 ## Bit rate

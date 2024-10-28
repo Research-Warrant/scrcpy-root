@@ -1,11 +1,34 @@
 #include "display.h"
 
 #include <assert.h>
+#include <libavutil/pixfmt.h>
 
 #include "util/log.h"
 
+static bool
+sc_display_init_novideo_icon(struct sc_display *display,
+                             SDL_Surface *icon_novideo) {
+    assert(icon_novideo);
+
+    if (SDL_RenderSetLogicalSize(display->renderer,
+                                 icon_novideo->w, icon_novideo->h)) {
+        LOGW("Could not set renderer logical size: %s", SDL_GetError());
+        // don't fail
+    }
+
+    display->texture = SDL_CreateTextureFromSurface(display->renderer,
+                                                    icon_novideo);
+    if (!display->texture) {
+        LOGE("Could not create texture: %s", SDL_GetError());
+        return false;
+    }
+
+    return true;
+}
+
 bool
-sc_display_init(struct sc_display *display, SDL_Window *window, bool mipmaps) {
+sc_display_init(struct sc_display *display, SDL_Window *window,
+                SDL_Surface *icon_novideo, bool mipmaps) {
     display->renderer =
         SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!display->renderer) {
@@ -19,6 +42,10 @@ sc_display_init(struct sc_display *display, SDL_Window *window, bool mipmaps) {
     LOGI("Renderer: %s", renderer_name ? renderer_name : "(unknown)");
 
     display->mipmaps = false;
+
+#ifdef SC_DISPLAY_FORCE_OPENGL_CORE_PROFILE
+    display->gl_context = NULL;
+#endif
 
     // starts with "opengl"
     bool use_opengl = renderer_name && !strncmp(renderer_name, "opengl", 6);
@@ -53,17 +80,31 @@ sc_display_init(struct sc_display *display, SDL_Window *window, bool mipmaps) {
                 display->mipmaps = true;
             } else {
                 LOGW("Trilinear filtering disabled "
-                     "(OpenGL 3.0+ or ES 2.0+ required");
+                     "(OpenGL 3.0+ or ES 2.0+ required)");
             }
         } else {
             LOGI("Trilinear filtering disabled");
         }
     } else if (mipmaps) {
-        LOGD("Trilinear filtering disabled (not an OpenGL renderer");
+        LOGD("Trilinear filtering disabled (not an OpenGL renderer)");
     }
 
+    display->texture = NULL;
     display->pending.flags = 0;
     display->pending.frame = NULL;
+    display->has_frame = false;
+
+    if (icon_novideo) {
+        // Without video, set a static scrcpy icon as window content
+        bool ok = sc_display_init_novideo_icon(display, icon_novideo);
+        if (!ok) {
+#ifdef SC_DISPLAY_FORCE_OPENGL_CORE_PROFILE
+            SDL_GL_DeleteContext(display->gl_context);
+#endif
+            SDL_DestroyRenderer(display->renderer);
+            return false;
+        }
+    }
 
     return true;
 }
@@ -195,9 +236,25 @@ sc_display_set_texture_size(struct sc_display *display, struct sc_size size) {
     return SC_DISPLAY_RESULT_OK;
 }
 
+static SDL_YUV_CONVERSION_MODE
+sc_display_to_sdl_color_range(enum AVColorRange color_range) {
+    return color_range == AVCOL_RANGE_JPEG ? SDL_YUV_CONVERSION_JPEG
+                                           : SDL_YUV_CONVERSION_AUTOMATIC;
+}
+
 static bool
 sc_display_update_texture_internal(struct sc_display *display,
                                    const AVFrame *frame) {
+    if (!display->has_frame) {
+        // First frame
+        display->has_frame = true;
+
+        // Configure YUV color range conversion
+        SDL_YUV_CONVERSION_MODE sdl_color_range =
+            sc_display_to_sdl_color_range(frame->color_range);
+        SDL_SetYUVConversionMode(sdl_color_range);
+    }
+
     int ret = SDL_UpdateYUVTexture(display->texture, NULL,
                                    frame->data[0], frame->linesize[0],
                                    frame->data[1], frame->linesize[1],
@@ -234,7 +291,7 @@ sc_display_update_texture(struct sc_display *display, const AVFrame *frame) {
 
 enum sc_display_result
 sc_display_render(struct sc_display *display, const SDL_Rect *geometry,
-                  unsigned rotation) {
+                  enum sc_orientation orientation) {
     SDL_RenderClear(display->renderer);
 
     if (display->pending.flags) {
@@ -247,33 +304,33 @@ sc_display_render(struct sc_display *display, const SDL_Rect *geometry,
     SDL_Renderer *renderer = display->renderer;
     SDL_Texture *texture = display->texture;
 
-    if (rotation == 0) {
+    if (orientation == SC_ORIENTATION_0) {
         int ret = SDL_RenderCopy(renderer, texture, NULL, geometry);
         if (ret) {
             LOGE("Could not render texture: %s", SDL_GetError());
             return SC_DISPLAY_RESULT_ERROR;
         }
     } else {
-        // rotation in RenderCopyEx() is clockwise, while screen->rotation is
-        // counterclockwise (to be consistent with --lock-video-orientation)
-        int cw_rotation = (4 - rotation) % 4;
+        unsigned cw_rotation = sc_orientation_get_rotation(orientation);
         double angle = 90 * cw_rotation;
 
         const SDL_Rect *dstrect = NULL;
         SDL_Rect rect;
-        if (rotation & 1) {
+        if (sc_orientation_is_swap(orientation)) {
             rect.x = geometry->x + (geometry->w - geometry->h) / 2;
             rect.y = geometry->y + (geometry->h - geometry->w) / 2;
             rect.w = geometry->h;
             rect.h = geometry->w;
             dstrect = &rect;
         } else {
-            assert(rotation == 2);
             dstrect = geometry;
         }
 
+        SDL_RendererFlip flip = sc_orientation_is_mirror(orientation)
+                              ? SDL_FLIP_HORIZONTAL : 0;
+
         int ret = SDL_RenderCopyEx(renderer, texture, NULL, dstrect, angle,
-                                   NULL, 0);
+                                   NULL, flip);
         if (ret) {
             LOGE("Could not render texture: %s", SDL_GetError());
             return SC_DISPLAY_RESULT_ERROR;

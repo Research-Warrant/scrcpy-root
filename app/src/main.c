@@ -16,6 +16,7 @@
 #include "usb/scrcpy_otg.h"
 #include "util/log.h"
 #include "util/net.h"
+#include "util/thread.h"
 #include "version.h"
 
 #ifdef _WIN32
@@ -23,7 +24,7 @@
 #include "util/str.h"
 #endif
 
-int
+static int
 main_scrcpy(int argc, char *argv[]) {
 #ifdef _WIN32
     // disable buffering, we want logs immediately
@@ -39,27 +40,36 @@ main_scrcpy(int argc, char *argv[]) {
         .opts = scrcpy_options_default,
         .help = false,
         .version = false,
+        .pause_on_exit = SC_PAUSE_ON_EXIT_FALSE,
     };
 
 #ifndef NDEBUG
     args.opts.log_level = SC_LOG_LEVEL_DEBUG;
 #endif
 
+    enum scrcpy_exit_code ret;
+
     if (!scrcpy_parse_args(&args, argc, argv)) {
-        return SCRCPY_EXIT_FAILURE;
+        ret = SCRCPY_EXIT_FAILURE;
+        goto end;
     }
 
     sc_set_log_level(args.opts.log_level);
 
     if (args.help) {
         scrcpy_print_usage(argv[0]);
-        return SCRCPY_EXIT_SUCCESS;
+        ret = SCRCPY_EXIT_SUCCESS;
+        goto end;
     }
 
     if (args.version) {
         scrcpy_print_version();
-        return SCRCPY_EXIT_SUCCESS;
+        ret = SCRCPY_EXIT_SUCCESS;
+        goto end;
     }
+
+    // The current thread is the main thread
+    SC_MAIN_THREAD_ID = sc_thread_get_id();
 
 #ifdef SCRCPY_LAVF_REQUIRES_REGISTER_ALL
     av_register_all();
@@ -72,17 +82,25 @@ main_scrcpy(int argc, char *argv[]) {
 #endif
 
     if (!net_init()) {
-        return SCRCPY_EXIT_FAILURE;
+        ret = SCRCPY_EXIT_FAILURE;
+        goto end;
     }
 
     sc_log_configure();
 
 #ifdef HAVE_USB
-    enum scrcpy_exit_code ret = args.opts.otg ? scrcpy_otg(&args.opts)
-                                              : scrcpy(&args.opts);
+    ret = args.opts.otg ? scrcpy_otg(&args.opts) : scrcpy(&args.opts);
 #else
-    enum scrcpy_exit_code ret = scrcpy(&args.opts);
+    ret = scrcpy(&args.opts);
 #endif
+
+end:
+    if (args.pause_on_exit == SC_PAUSE_ON_EXIT_TRUE ||
+            (args.pause_on_exit == SC_PAUSE_ON_EXIT_IF_ERROR &&
+                ret != SCRCPY_EXIT_SUCCESS)) {
+        printf("Press Enter to continue...\n");
+        getchar();
+    }
 
     return ret;
 }

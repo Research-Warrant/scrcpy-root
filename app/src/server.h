@@ -26,24 +26,31 @@ struct sc_server_params {
     enum sc_log_level log_level;
     enum sc_codec video_codec;
     enum sc_codec audio_codec;
+    enum sc_video_source video_source;
     enum sc_audio_source audio_source;
+    enum sc_camera_facing camera_facing;
     const char *crop;
     const char *video_codec_options;
     const char *audio_codec_options;
     const char *video_encoder;
     const char *audio_encoder;
+    const char *camera_id;
+    const char *camera_size;
+    const char *camera_ar;
+    uint16_t camera_fps;
     struct sc_port_range port_range;
     uint32_t tunnel_host;
     uint16_t tunnel_port;
     uint16_t max_size;
     uint32_t video_bit_rate;
     uint32_t audio_bit_rate;
-    uint16_t max_fps;
+    const char *max_fps; // float to be parsed by the server
     int8_t lock_video_orientation;
     bool control;
     uint32_t display_id;
     bool video;
     bool audio;
+    bool audio_dup;
     bool show_touches;
     bool stay_awake;
     bool force_adb_forward;
@@ -56,9 +63,9 @@ struct sc_server_params {
     bool select_tcpip;
     bool cleanup;
     bool power_on;
-    bool list_encoders;
-    bool list_displays;
     bool kill_adb_on_close;
+    bool camera_high_speed;
+    uint8_t list;
 };
 
 struct sc_server {
