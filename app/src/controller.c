@@ -92,6 +92,8 @@ sc_controller_destroy(struct sc_controller *controller) {
 bool
 sc_controller_push_msg(struct sc_controller *controller,
                        const struct sc_control_msg *msg) {
+    sc_control_msg_log_human(msg);
+
     if (sc_get_log_level() <= SC_LOG_LEVEL_VERBOSE) {
         sc_control_msg_log(msg);
     }
